@@ -129,15 +129,6 @@ protected:
   friend class C_MDS_WroteImportMap;
   friend class MDCache;
 
-  struct C_MDL_WriteError : public Context {
-    MDLog *mdlog;
-    C_MDL_WriteError(MDLog *m) : mdlog(m) {}
-    void finish(int r) {
-      mdlog->handle_journaler_write_error(r);
-    }
-  };
-  void handle_journaler_write_error(int r);
-
   LogEvent *cur_event;
 
   class C_MaybeExpiredSegment : public Context {
