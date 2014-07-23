@@ -242,12 +242,17 @@ private:
   int state;
   int error;
 
+  void _write_head(Context *oncommit=NULL);
+  void _wait_for_flush(Context *onsafe);
+  void _trim();
+
   // header
   utime_t last_wrote_head;
   void _finish_write_head(int r, Header &wrote, Context *oncommit);
   class C_WriteHead;
   friend class C_WriteHead;
 
+  void _set_layout(ceph_file_layout const *l);
   list<Context*> waitfor_recover;
   void read_head(Context *on_finish, bufferlist *bl);
   void _finish_read_head(int r, bufferlist& bl);
@@ -413,7 +418,7 @@ public:
 
   // Synchronous setters
   // ===================
-  void set_layout(ceph_file_layout *l);
+  void set_layout(ceph_file_layout const *l);
   void set_readonly();
   void set_writeable();
   void set_write_pos(int64_t p) { 

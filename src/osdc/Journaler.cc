@@ -51,17 +51,21 @@ void Journaler::create(ceph_file_layout *l, stream_format_t const sf)
 
   stream_format = sf;
   journal_stream.set_format(sf);
-  set_layout(l);
+  _set_layout(l);
 
   prezeroing_pos = prezero_pos = write_pos = flush_pos = safe_pos =
     read_pos = requested_pos = received_pos =
     expire_pos = trimming_pos = trimmed_pos = layout.fl_stripe_count * layout.fl_object_size;
 }
 
-void Journaler::set_layout(ceph_file_layout *l)
+void Journaler::set_layout(ceph_file_layout const *l)
 {
-  Mutex::Locker lk(lock);
+    Mutex::Locker lk(lock);
+    _set_layout(l);
+}
 
+void Journaler::_set_layout(ceph_file_layout const *l)
+{
   layout = *l;
 
   assert(layout.fl_pg_pool == pg_pool);
@@ -243,7 +247,7 @@ void Journaler::_finish_read_head(int r, bufferlist& bl)
   trimmed_pos = trimming_pos = h.trimmed_pos;
 
   init_headers(h);
-  set_layout(&h.layout);
+  _set_layout(&h.layout);
   stream_format = h.stream_format;
   journal_stream.set_format(h.stream_format);
 
@@ -364,7 +368,12 @@ public:
 void Journaler::write_head(Context *oncommit)
 {
   Mutex::Locker l(lock);
+  _write_head(oncommit);
+}
 
+
+void Journaler::_write_head(Context *oncommit)
+{
   assert(!readonly);
   assert(state == STATE_ACTIVE);
   last_written.trimmed_pos = trimmed_pos;
@@ -403,7 +412,7 @@ void Journaler::_finish_write_head(int r, Header &wrote, Context *oncommit)
     oncommit->complete(r);
   }
 
-  trim();  // trim?
+  _trim();  // trim?
 }
 
 
@@ -588,11 +597,14 @@ void Journaler::_do_flush(unsigned amount)
 }
 
 
-
 void Journaler::wait_for_flush(Context *onsafe)
 {
   Mutex::Locker l(lock);
+  _wait_for_flush(onsafe);
+}
 
+void Journaler::_wait_for_flush(Context *onsafe)
+{
   assert(!readonly);
   
   // all flushed and safe?
@@ -643,12 +655,12 @@ void Journaler::_flush(Context *onsafe)
       ldout(cct, 20) << "flush not delaying flush" << dendl;
       _do_flush();
     }
-    wait_for_flush(onsafe);
+    _wait_for_flush(onsafe);
   }
 
   // write head?
   if (last_wrote_head.sec() + cct->_conf->journaler_write_head_interval < ceph_clock_now(cct).sec()) {
-    write_head();
+    _write_head();
   }
 }
 
@@ -1058,7 +1070,11 @@ public:
 void Journaler::trim()
 {
   Mutex::Locker l(lock);
+  _trim();
+}
 
+void Journaler::_trim()
+{
   assert(!readonly);
   uint64_t period = get_layout_period();
   uint64_t trim_to = last_committed.expire_pos;
