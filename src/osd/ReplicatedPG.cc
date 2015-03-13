@@ -12453,14 +12453,17 @@ bool ReplicatedPG::agent_maybe_evict(ObjectContextRef& obc)
   const hobject_t& soid = obc->obs.oi.soid;
   if (obc->obs.oi.is_dirty()) {
     dout(20) << __func__ << " skip (dirty) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
     return false;
   }
   if (!obc->obs.oi.watchers.empty()) {
     dout(20) << __func__ << " skip (watchers) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
     return false;
   }
   if (obc->is_blocked()) {
     dout(20) << __func__ << " skip (blocked) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
     return false;
   }
 
@@ -12468,6 +12471,7 @@ bool ReplicatedPG::agent_maybe_evict(ObjectContextRef& obc)
     int result = _verify_no_head_clones(soid, obc->ssc->snapset);
     if (result < 0) {
       dout(20) << __func__ << " skip (clones) " << obc->obs.oi << dendl;
+      osd->logger->inc(l_osd_agent_skip);
       return false;
     }
   }
@@ -12524,12 +12528,15 @@ bool ReplicatedPG::agent_maybe_evict(ObjectContextRef& obc)
 
     // FIXME: ignore temperature for now.
 
-    if (1000000 - atime_upper >= agent_state->evict_effort)
+    if (1000000 - atime_upper >= agent_state->evict_effort) {
+      osd->logger->inc(l_osd_agent_skip);
       return false;
+    }
   }
 
   if (!obc->get_write(OpRequestRef())) {
     dout(20) << __func__ << " skip (cannot get lock) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
     return false;
   }
 
