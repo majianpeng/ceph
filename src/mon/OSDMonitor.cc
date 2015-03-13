@@ -6504,6 +6504,15 @@ done:
         goto reply;
       }
     }
+    //see commit 30c904ea67
+    if (mode == pg_pool_t::CACHEMODE_READPROXY &&
+	!(osdmap.get_up_osd_features() && CEPH_FEATURE_OSD_PROXY_FEATURES)) {
+      ss << "Because some osd in cluster don't supoort CEPH_FEATURE_OSD_PROXY_FEATURES,"
+	<< " but READPROXY must need all osd support this feature.";
+      err = -EINVAL;
+      goto reply;
+
+    }
     // go
     pg_pool_t *np = pending_inc.get_new_pool(pool_id, p);
     np->cache_mode = mode;
