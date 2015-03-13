@@ -11965,8 +11965,7 @@ void ReplicatedPG::hit_set_persist()
 
   ObjectContextRef obc = get_object_context(oid, true);
   repop = simple_repop_create(obc);
-  if (flush_time != 0)
-    repop->on_applied = new C_HitSetFlushing(this, flush_time);
+  repop->on_applied = new C_HitSetFlushing(this, flush_time);
   OpContext *ctx = repop->ctx;
   ctx->at_version = get_next_version();
   ctx->updated_hset_history = info.hit_set;
