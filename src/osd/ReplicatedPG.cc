@@ -1882,6 +1882,7 @@ bool ReplicatedPG::maybe_handle_cache(OpRequestRef op,
   const object_locator_t& oloc = m->get_object_locator();
 
   if (must_promote || op->need_promote()) {
+    assert(pool.info.cache_mode != pg_pool_t::CACHEMODE_FORWARD);
     promote_object(obc, missing_oid, oloc, op);
     return true;
   }
