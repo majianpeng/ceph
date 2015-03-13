@@ -1555,6 +1555,9 @@ void ReplicatedPG::do_op(OpRequestRef& op)
 
   ObjectContextRef obc;
   bool can_create = op->may_write() || op->may_cache();
+  //CACHEMODE_READONLY: Forward writes to base pool
+  if (pool.info.cache_mode == pg_pool_t::CACHEMODE_READONLY)
+    can_create = false;
   hobject_t missing_oid;
   hobject_t oid(m->get_oid(),
 		m->get_object_locator().key,
@@ -1866,7 +1869,10 @@ bool ReplicatedPG::maybe_handle_cache(OpRequestRef op,
     return false;
   }
 
-  if (obc.get() && obc->obs.exists) {
+  //for readonly, if op is write let op do redirect
+  if (obc.get() && obc->obs.exists &&
+      !((op->may_write() || op->may_cache()) &&
+	pool.info.cache_mode == pg_pool_t::CACHEMODE_READONLY)) {
     return false;
   }
 
@@ -1960,19 +1966,11 @@ bool ReplicatedPG::maybe_handle_cache(OpRequestRef op,
     return true;
 
   case pg_pool_t::CACHEMODE_READONLY:
-    // TODO: clean this case up
-    if (!obc.get() && r == -ENOENT) {
-      // we don't have the object and op's a read
-      promote_object(obc, missing_oid, oloc, op);
-      return true;
-    }
-    if (!r) { // it must be a write
+    if (op->may_write() || op->may_cache())
       do_cache_redirect(op);
-      return true;
-    }
-    // crap, there was a failure of some kind
-    return false;
-
+    else
+      promote_object(obc, missing_oid, oloc, op);
+    return true;
   case pg_pool_t::CACHEMODE_READFORWARD:
     // Do writeback to the cache tier for writes
     if (op->may_write() || write_ordered) {
