@@ -1556,7 +1556,9 @@ void ReplicatedPG::do_op(OpRequestRef& op)
   ObjectContextRef obc;
   bool can_create = op->may_write() || op->may_cache();
   //CACHEMODE_READONLY: Forward writes to base pool
-  if (pool.info.cache_mode == pg_pool_t::CACHEMODE_READONLY)
+  //CACHEMODE_FORWARD: forward all op to base tier, so don't create obc
+  if (pool.info.cache_mode == pg_pool_t::CACHEMODE_READONLY ||
+      pool.info.cache_mode == pg_pool_t::CACHEMODE_FORWARD)
     can_create = false;
   hobject_t missing_oid;
   hobject_t oid(m->get_oid(),
