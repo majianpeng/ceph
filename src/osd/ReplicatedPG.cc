@@ -11801,6 +11801,7 @@ void ReplicatedPG::hit_set_setup()
       !pool.info.hit_set_count ||
       !pool.info.hit_set_period ||
       pool.info.hit_set_params.get_type() == HitSet::TYPE_NONE) {
+    dout(10) << __func__ << " majianpeng" << dendl;
     hit_set_clear();
     //hit_set_remove_all();  // FIXME: implement me soon
     return;
@@ -12479,7 +12480,7 @@ bool ReplicatedPG::agent_maybe_evict(ObjectContextRef& obc)
   if (agent_state->evict_mode != TierAgentState::EVICT_MODE_FULL) {
     // is this object old and/or cold enough?
     int atime = -1, temp = 0;
-    if (hit_set)
+    if (hit_set || agent_state->his_set_map.size())
       agent_estimate_atime_temp(soid, &atime, NULL /*FIXME &temp*/);
 
     uint64_t atime_upper = 0, atime_lower = 0;
@@ -12775,11 +12776,10 @@ void ReplicatedPG::agent_choose_mode(bool restart)
 void ReplicatedPG::agent_estimate_atime_temp(const hobject_t& oid,
 					     int *atime, int *temp)
 {
-  assert(hit_set);
   *atime = -1;
   if (temp)
     *temp = 0;
-  if (hit_set->contains(oid)) {
+  if (hit_set && hit_set->contains(oid)) {
     *atime = 0;
     if (temp)
       ++(*temp);
