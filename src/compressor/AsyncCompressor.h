@@ -95,7 +95,8 @@ class AsyncCompressor {
         r = async_compressor->compressor->decompress(item->data, out);
       if (!r) {
         item->data.swap(out);
-        assert(item->status.compare_and_swap(WORKING, DONE));
+	bool result = item->status.compare_and_swap(WORKING, DONE);
+	assert(result);
       } else {
         item->status.set(ERROR);
       }
