@@ -3323,6 +3323,9 @@ int FileStore::_clone(coll_t cid, const ghobject_t& oldoid, const ghobject_t& ne
     if (r < 0) {
       goto out;
     }
+  }
+
+  {
     r = ::ftruncate(**n, 0);
     if (r < 0) {
       goto out3;
@@ -3339,9 +3342,7 @@ int FileStore::_clone(coll_t cid, const ghobject_t& oldoid, const ghobject_t& ne
     r = object_map->clone(oldoid, newoid, &spos);
     if (r < 0 && r != -ENOENT)
       goto out3;
-  }
 
-  {
     char buf[2];
     map<string, bufferptr> aset;
     r = _fgetattrs(**o, aset);
