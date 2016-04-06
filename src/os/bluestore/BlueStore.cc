@@ -1473,7 +1473,7 @@ int BlueStore::_balance_bluefs_freespace(vector<bluestore_extent_t> *extents,
   if (gift) {
     // round up to alloc size
     uint64_t min_alloc_size = g_conf->bluestore_min_alloc_size;
-    gift = ROUND_UP_TO(gift, min_alloc_size);
+    gift = ROUND_UP_TO(gift, MAX(min_alloc_size, g_conf->bluefs_alloc_size));
 
     // hard cap to fit into 32 bits
     gift = MIN(gift, 1ull<<31);
