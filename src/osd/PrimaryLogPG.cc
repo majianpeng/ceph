@@ -3174,6 +3174,9 @@ void PrimaryLogPG::reply_ctx(OpContext *ctx, int r, eversion_t v, version_t uv)
 
 void PrimaryLogPG::log_op_stats(OpContext *ctx)
 {
+  if (!cct->_conf->perf)
+    return;
+
   OpRequestRef op = ctx->op;
   const MOSDOp *m = static_cast<const MOSDOp*>(op->get_req());
 
