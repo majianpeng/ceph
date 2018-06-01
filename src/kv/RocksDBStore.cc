@@ -492,7 +492,7 @@ int RocksDBStore::do_open(ostream &out, bool create_if_missing,
 	rocksdb::ColumnFamilyHandle *cf;
 	status = db->CreateColumnFamily(cf_opt, p.name, &cf);
 	if (!status.ok()) {
-	  derr << __func__ << " Failed to create rocksdb column family: "
+	  derr << __func__ << " Failed to create rocksdb column family(" << status.ToString() << "):"
 	       << p.name << dendl;
 	  return -EINVAL;
 	}
