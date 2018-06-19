@@ -100,7 +100,7 @@ void SafeTimer::timer_thread()
     }
 
     // recheck stopping if we dropped the lock
-    if (!safe_callbacks && stopping)
+    if (stopping)
       break;
 
     ldout(cct,20) << "timer_thread going to sleep" << dendl;
