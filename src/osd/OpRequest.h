@@ -83,7 +83,7 @@ private:
   entity_inst_t req_src_inst;
   uint8_t hit_flag_points;
   uint8_t latest_flag_point;
-  utime_t dequeued_time;
+  utime_t enqueued_time, dequeued_time;
   static const uint8_t flag_queued_for_pg=1 << 0;
   static const uint8_t flag_reached_pg =  1 << 1;
   static const uint8_t flag_delayed =     1 << 2;
@@ -152,7 +152,12 @@ public:
   void mark_commit_sent() {
     mark_flag_point(flag_commit_sent, "commit_sent");
   }
-
+  utime_t get_enqueued_time() const {
+    return enqueued_time;
+  }
+  void set_enqueued_time(utime_t deq_time) {
+    enqueued_time = deq_time;
+  }
   utime_t get_dequeued_time() const {
     return dequeued_time;
   }

@@ -4104,8 +4104,8 @@ void PrimaryLogPG::log_op_stats(const OpRequest& op,
 {
   const MOSDOp* const m = static_cast<const MOSDOp*>(op.get_req());
   const utime_t now = ceph_clock_now();
-
-  const utime_t latency = now - m->get_recv_stamp();
+  const utime_t recv_stamp = m->get_recv_stamp();
+  const utime_t latency = now - recv_stamp;
   const utime_t process_latency = now - op.get_dequeued_time();
 
   osd->logger->inc(l_osd_op);
@@ -4123,6 +4123,10 @@ void PrimaryLogPG::log_op_stats(const OpRequest& op,
     osd->logger->hinc(l_osd_op_rw_lat_inb_hist, latency.to_nsec(), inb);
     osd->logger->hinc(l_osd_op_rw_lat_outb_hist, latency.to_nsec(), outb);
     osd->logger->tinc(l_osd_op_rw_process_lat, process_latency);
+    osd->logger->tinc(l_osd_op_before_queue_op_lat,
+		      op.get_enqueued_time() - recv_stamp);
+    osd->logger->tinc(l_osd_op_before_dequeue_op_lat,
+		      op.get_dequeued_time() - recv_stamp);
   } else if (op.may_read()) {
     osd->logger->inc(l_osd_op_r);
     osd->logger->inc(l_osd_op_r_outb, outb);

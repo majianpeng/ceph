@@ -9260,21 +9260,19 @@ bool OSD::op_is_discardable(const MOSDOp *op)
 void OSD::enqueue_op(spg_t pg, OpRequestRef&& op, epoch_t epoch)
 {
   const utime_t stamp = op->get_req()->get_recv_stamp();
-  const utime_t latency = ceph_clock_now() - stamp;
   const unsigned priority = op->get_req()->get_priority();
   const int cost = op->get_req()->get_cost();
   const uint64_t owner = op->get_req()->get_source().num();
 
   dout(15) << "enqueue_op " << op << " prio " << priority
 	   << " cost " << cost
-	   << " latency " << latency
 	   << " epoch " << epoch
 	   << " " << *(op->get_req()) << dendl;
   op->osd_trace.event("enqueue op");
   op->osd_trace.keyval("priority", priority);
   op->osd_trace.keyval("cost", cost);
   op->mark_queued_for_pg();
-  logger->tinc(l_osd_op_before_queue_op_lat, latency);
+  op->set_enqueued_time(ceph_clock_now());
   op_shardedwq.queue(
     OpQueueItem(
       unique_ptr<OpQueueItem::OpQueueable>(new PGOpItem(pg, std::move(op))),
@@ -9317,16 +9315,11 @@ void OSD::dequeue_op(
   FUNCTRACE(cct);
   OID_EVENT_TRACE_WITH_MSG(op->get_req(), "DEQUEUE_OP_BEGIN", false);
 
-  utime_t now = ceph_clock_now();
-  op->set_dequeued_time(now);
-  utime_t latency = now - op->get_req()->get_recv_stamp();
+  op->set_dequeued_time(ceph_clock_now());
   dout(10) << "dequeue_op " << op << " prio " << op->get_req()->get_priority()
 	   << " cost " << op->get_req()->get_cost()
-	   << " latency " << latency
 	   << " " << *(op->get_req())
 	   << " pg " << *pg << dendl;
-
-  logger->tinc(l_osd_op_before_dequeue_op_lat, latency);
 
   auto priv = op->get_req()->get_connection()->get_priv();
   if (auto session = static_cast<Session *>(priv.get()); session) {
