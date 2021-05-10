@@ -240,4 +240,167 @@ struct cls_rbd_snap {
 };
 WRITE_CLASS_ENCODER_FEATURES(cls_rbd_snap)
 
+struct cls_rbd_rwlcache_map {
+  epoch_t cache_id;
+
+  struct PrimaryInfo {
+    uint64_t id;
+    uint64_t size;
+    uint32_t copies;
+    struct entity_addr_t address;
+
+    void encode(ceph::buffer::list& bl, uint64_t features) const {
+      ENCODE_START(1, 1, bl);
+      encode(id, bl);
+      encode(size, bl);
+      encode(copies, bl);
+      encode(address, bl, features);
+      ENCODE_FINISH(bl);
+    }
+
+    void decode(ceph::buffer::list::const_iterator &it) {
+      DECODE_START(1, it);
+      decode(id, it);
+      decode(size, it);
+      decode(copies, it);
+      decode(address, it);
+      DECODE_FINISH(it);
+    }
+  };
+  std::map<uint64_t, struct PrimaryInfo> primary_infos;
+
+  struct DaemonInfo {
+    uint64_t id;
+    std::string rdma_address;
+    int32_t rdma_port;
+    uint64_t total_size;
+    uint64_t free_size;
+    struct entity_addr_t address;
+
+    void encode(ceph::buffer::list &bl, uint64_t features) const {
+      ENCODE_START(1, 1, bl);
+      encode(id, bl);
+      encode(rdma_address, bl);
+      encode(rdma_port, bl);
+      encode(total_size, bl);
+      encode(free_size, bl);
+      encode(address, bl, features);
+      ENCODE_FINISH(bl);
+    }
+
+    void decode(ceph::buffer::list::const_iterator &it) {
+      DECODE_START(1, it);
+      decode(id, it);
+      decode(rdma_address, it);
+      decode(rdma_port, it);
+      decode(total_size, it);
+      decode(free_size, it);
+      decode(address, it);
+      DECODE_FINISH(it);
+    }
+  };
+
+  std::map<uint64_t, struct DaemonInfo> daemon_infos;
+
+  struct CacheInfo {
+    epoch_t cache_id;
+    uint64_t primary_id;
+    std::vector<uint64_t> daemon_id;
+
+    void encode(ceph::buffer::list &bl) const {
+      ENCODE_START(1, 1, bl);
+      encode(cache_id, bl);
+      encode(primary_id, bl);
+      encode(daemon_id, bl);
+      ENCODE_FINISH(bl);
+    }
+
+    void decode(ceph::buffer::list::const_iterator &it) {
+      DECODE_START(1, it);
+      decode(cache_id, it);
+      decode(primary_id, it);
+      decode(daemon_id, it);
+      DECODE_FINISH(it);
+    }
+  };
+
+  std::map<epoch_t, struct CacheInfo> cache_infos;
+
+  cls_rbd_rwlcache_map() {
+    cache_id = 0;
+  }
+
+void encode(ceph::buffer::list& bl, uint64_t features) const {
+    ENCODE_START(1, 1, bl);
+    encode(cache_id, bl);
+    encode(primary_infos, bl, features);
+    encode(daemon_infos, bl, features);
+    encode(cache_infos, bl);
+    ENCODE_FINISH(bl);
+  }
+
+  void decode(ceph::buffer::list::const_iterator &it) {
+    DECODE_START(1, it);
+    decode(cache_id, it);
+    decode(primary_infos, it);
+    decode(daemon_infos, it);
+    decode(cache_infos, it);
+    DECODE_FINISH(it);
+  }
+
+  void dump(ceph::Formatter *f) const {
+    f->open_array_section("primary infos");
+    for (const auto &i : primary_infos) {
+      auto &info = i.second;
+      f->open_object_section("primary info");
+      f->dump_unsigned("id", info.id);
+      f->dump_unsigned("copies", info.copies);
+      f->dump_unsigned("size", info.copies);
+      f->dump_string("address", info.address.get_legacy_str());
+      f->close_section();
+    }
+    f->close_section();
+
+    f->open_array_section("daemon infos");
+    for (const auto &i : daemon_infos) {
+      auto &info = i.second;
+      f->open_object_section("daemon info");
+      f->dump_unsigned("id", info.id);
+      f->dump_string("rdma_address", info.rdma_address);
+      f->dump_unsigned("rdma_port", info.rdma_port);
+      f->dump_unsigned("total size(byte)", info.total_size);
+      f->dump_unsigned("free size(byte)", info.free_size);
+      f->dump_string("daemon address", info.address.get_legacy_str());
+      f->close_section();
+    }
+    f->close_section();
+
+    f->open_array_section("cache infos");
+    f->dump_unsigned("currently cache id", cache_id);
+    for (const auto &i : cache_infos) {
+      auto &info = i.second;
+      f->open_object_section("cache info");
+      f->dump_unsigned("cache id", info.cache_id);
+      f->dump_unsigned("primary id", info.primary_id);
+      {
+	std::ostringstream oss;
+	oss << "[ ";
+	for (auto it = info.daemon_id.begin(); it != info.daemon_id.end(); it++) {
+	  oss << *it << " ";
+	}
+	oss << "]";
+	f->dump_string("daemons id", oss.str());
+      }
+
+      f->close_section();
+    }
+    f->close_section();
+  }
+};
+
+WRITE_CLASS_ENCODER_FEATURES(cls_rbd_rwlcache_map::PrimaryInfo)
+WRITE_CLASS_ENCODER_FEATURES(cls_rbd_rwlcache_map::DaemonInfo)
+WRITE_CLASS_ENCODER(cls_rbd_rwlcache_map::CacheInfo)
+WRITE_CLASS_ENCODER_FEATURES(cls_rbd_rwlcache_map)
+
 #endif // __CEPH_CLS_RBD_H

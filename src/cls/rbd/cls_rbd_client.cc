@@ -2992,5 +2992,47 @@ int sparsify(librados::IoCtx *ioctx, const std::string &oid, uint64_t sparse_siz
   return ioctx->operate(oid, &op);
 }
 
+void rwlcache_daemoninfo(librados::ObjectWriteOperation *op, struct cls::rbd::RwlCacheDaemonInfo &req)
+{
+  bufferlist bl;
+  encode(req, bl);
+  op->exec("rbd", "rwlcache_daemoninfo", bl);
+}
+
+int rwlcache_daemoninfo(librados::IoCtx *ioctx, struct cls::rbd::RwlCacheDaemonInfo &req)
+{
+  librados::ObjectWriteOperation op;
+  rwlcache_daemoninfo(&op, req);
+  return  ioctx->operate(std::string(RBD_RWLCACHE_MAP_OBJECT_NAME), &op);
+}
+
+void rwlcache_request(librados::ObjectWriteOperation *op, struct cls::rbd::RwlCacheRequest &req)
+{
+  bufferlist bl;
+  encode(req, bl);
+  op->exec("rbd", "rwlcache_request", bl);
+}
+
+int rwlcache_request(librados::IoCtx *ioctx, struct cls::rbd::RwlCacheRequest &req)
+{
+  librados::ObjectWriteOperation op;
+  rwlcache_request(&op, req);
+  return  ioctx->operate(std::string(RBD_RWLCACHE_MAP_OBJECT_NAME), &op);
+}
+
+void rwlcache_free(librados::ObjectWriteOperation *op, struct cls::rbd::RwlCacheFree &req)
+{
+  bufferlist bl;
+  encode(req, bl);
+  op->exec("rbd", "rwlcache_free", bl);
+}
+
+int rwlcache_free(librados::IoCtx *ioctx, struct cls::rbd::RwlCacheFree &req)
+{
+  librados::ObjectWriteOperation op;
+  rwlcache_free(&op, req);
+  return  ioctx->operate(std::string(RBD_RWLCACHE_MAP_OBJECT_NAME), &op);
+}
+
 } // namespace cls_client
 } // namespace librbd
