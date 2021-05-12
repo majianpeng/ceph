@@ -3006,6 +3006,20 @@ int rwlcache_daemoninfo(librados::IoCtx *ioctx, struct cls::rbd::RwlCacheDaemonI
   return  ioctx->operate(std::string(RBD_RWLCACHE_MAP_OBJECT_NAME), &op);
 }
 
+void rwlcache_daemonping(librados::ObjectWriteOperation *op, struct cls::rbd::RwlCacheDaemonPing &req)
+{
+  bufferlist bl;
+  encode(req, bl);
+  op->exec("rbd", "rwlcache_daemonping", bl);
+}
+
+int rwlcache_daemonping(librados::IoCtx *ioctx, struct cls::rbd::RwlCacheDaemonPing &req)
+{
+  librados::ObjectWriteOperation op;
+  rwlcache_daemonping(&op, req);
+  return  ioctx->operate(std::string(RBD_RWLCACHE_MAP_OBJECT_NAME), &op);
+}
+
 void rwlcache_request(librados::ObjectWriteOperation *op, struct cls::rbd::RwlCacheRequest &req)
 {
   bufferlist bl;

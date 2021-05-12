@@ -276,6 +276,7 @@ struct cls_rbd_rwlcache_map {
     uint64_t total_size;
     uint64_t free_size;
     struct entity_addr_t address;
+    utime_t expiration;
 
     void encode(ceph::buffer::list &bl, uint64_t features) const {
       ENCODE_START(1, 1, bl);
@@ -285,6 +286,7 @@ struct cls_rbd_rwlcache_map {
       encode(total_size, bl);
       encode(free_size, bl);
       encode(address, bl, features);
+      encode(expiration, bl);
       ENCODE_FINISH(bl);
     }
 
@@ -296,6 +298,7 @@ struct cls_rbd_rwlcache_map {
       decode(total_size, it);
       decode(free_size, it);
       decode(address, it);
+      decode(expiration, it);
       DECODE_FINISH(it);
     }
   };

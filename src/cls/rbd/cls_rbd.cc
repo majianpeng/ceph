@@ -8159,6 +8159,69 @@ int rwlcache_daemoninfo(cls_method_context_t hctx, bufferlist *in, bufferlist *o
 }
 
 /*
+ * Send Ping from daemon to judge daemon whether health
+ *
+ * Input
+ * @param ping info (cls::rbd::RwlCacheDaemonPing)
+ *
+ * Output
+ * @returns 0 on success, negative error code on failure
+ */
+int rwlcache_daemonping(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  cls::rbd::RwlCacheDaemonPing ping;
+  cls_rbd_rwlcache_map map;
+
+  try {
+    auto it = in->cbegin();
+    decode(ping, it);
+  } catch (const ceph::buffer::error &err) {
+    return -EINVAL;
+  }
+
+  CLS_LOG(20, "got Ping for daemon %lu", ping.id);
+
+  bufferlist value;
+  int r = cls_cxx_map_get_val(hctx, RWLCACHE_MAP_KEY, &value);
+
+  if (r == -ENOENT || r == -ENODATA) {
+    CLS_ERR("no %s value", RWLCACHE_MAP_KEY);
+    return r;
+  }
+
+  try {
+    auto it = value.cbegin();
+    decode(map, it);
+  } catch (ceph::buffer::error &err) {
+    CLS_ERR("decode map error");
+    return -EIO;
+  }
+
+  if (map.daemon_infos.count(ping.id)) {
+    auto &daemon = map.daemon_infos[ping.id];
+    utime_t now = ceph_clock_now();
+    if (daemon.expiration < now) {
+      CLS_LOG(10, "daemon %lu lost to send some ping", ping.id);
+    }
+    daemon.expiration = now + utime_t(RBD_RWLCACHE_PING_TIMEOUT, 0);
+
+    value.clear();
+    uint64_t features = get_encode_features(hctx);
+    encode(map, value, features);
+    r = cls_cxx_map_set_val(hctx, RWLCACHE_MAP_KEY, &value);
+    if (r < 0) {
+      CLS_ERR("error updating daemon ping:%s", cpp_strerror(r).c_str());
+      return r;
+    }
+  } else {
+    CLS_ERR("can't found daemon %lu", ping.id);
+    return -ENOENT;
+  }
+
+  return 0;
+}
+
+/*
  * Request repliacted cache-space
  *
  * Input
@@ -8211,15 +8274,25 @@ int rwlcache_request(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   }
 
   std::vector<uint64_t> daemons(req.copies);
+  utime_t now = ceph_clock_now();
+  for (auto it = map.daemon_infos.begin(); it != map.daemon_infos.end(); it++) {
+    if (it->second.expiration < now) {
+      if (it->second.expiration + RBD_RWLCACHE_PING_TIMEOUT < now) {
+	CLS_ERR("daemon %lu lost >=2 ping and will be removed", it->second.id);
+	map.daemon_infos.erase(it++);
+      } else {
+	CLS_LOG(10, "daemon %lu lost one ping, so skip this allocation", it->second.id);
+      }
+    continue;
+    }
 
-  for (const auto &[id, daemon] : map.daemon_infos) {
-    if ((daemon.free_size >= req.size) &&
-	(!daemon.address.is_same_host(inst.addr))) {
-	daemons.push_back(daemon.id);
+    if ((it->second.free_size >= req.size) &&
+	(!it->second.address.is_same_host(inst.addr))) {
+      daemons.push_back(it->second.id);
 
-	if (daemons.size() == req.copies) {
-	  break;
-	}
+      if (daemons.size() == req.copies) {
+	break;
+      }
     }
   }
 
@@ -8473,6 +8546,7 @@ CLS_INIT(rbd)
   cls_method_handle_t h_assert_snapc_seq;
   cls_method_handle_t h_sparsify;
   cls_method_handle_t h_rwlcache_daemoninfo;
+  cls_method_handle_t h_rwlcache_daemonping;
   cls_method_handle_t h_rwlcache_request;
   cls_method_handle_t h_rwlcache_free;
 
@@ -8893,6 +8967,9 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "rwlcache_daemoninfo",
 			  CLS_METHOD_RD | CLS_METHOD_WR,
 			  rwlcache_daemoninfo, &h_rwlcache_daemoninfo);
+  cls_register_cxx_method(h_class, "rwlcache_daemonping",
+			  CLS_METHOD_RD | CLS_METHOD_WR,
+			  rwlcache_daemoninfo, &h_rwlcache_daemonping);
   cls_register_cxx_method(h_class, "rwlcache_request",
 			  CLS_METHOD_RD | CLS_METHOD_WR,
 			  rwlcache_request, &h_rwlcache_request);
