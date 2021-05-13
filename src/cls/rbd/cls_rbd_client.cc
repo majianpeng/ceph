@@ -3034,6 +3034,20 @@ int rwlcache_request(librados::IoCtx *ioctx, struct cls::rbd::RwlCacheRequest &r
   return  ioctx->operate(std::string(RBD_RWLCACHE_MAP_OBJECT_NAME), &op);
 }
 
+void rwlcache_request_replyack(librados::ObjectWriteOperation *op, struct cls::rbd::RwlCacheRequestReplyAck &req)
+{
+  bufferlist bl;
+  encode(req, bl);
+  op->exec("rbd", "rwlcache_request_replyack", bl);
+}
+
+int rwlcache_request_replyack(librados::IoCtx *ioctx, struct cls::rbd::RwlCacheRequestReplyAck &req)
+{
+  librados::ObjectWriteOperation op;
+  rwlcache_request_replyack(&op, req);
+  return  ioctx->operate(std::string(RBD_RWLCACHE_MAP_OBJECT_NAME), &op);
+}
+
 void rwlcache_free(librados::ObjectWriteOperation *op, struct cls::rbd::RwlCacheFree &req)
 {
   bufferlist bl;

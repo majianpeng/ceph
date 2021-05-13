@@ -327,17 +327,19 @@ struct cls_rbd_rwlcache_map {
     }
   };
 
-  std::map<epoch_t, struct CacheInfo> cache_infos;
+  std::map<epoch_t, CacheInfo> cache_infos;
+  std::map<epoch_t, std::pair<utime_t, CacheInfo>> uncommitted_cache_infos;
 
   cls_rbd_rwlcache_map() {
     cache_id = 0;
   }
 
-void encode(ceph::buffer::list& bl, uint64_t features) const {
+  void encode(ceph::buffer::list& bl, uint64_t features) const {
     ENCODE_START(1, 1, bl);
     encode(cache_id, bl);
     encode(primary_infos, bl, features);
     encode(daemon_infos, bl, features);
+    encode(uncommitted_cache_infos, bl, features);
     encode(cache_infos, bl);
     ENCODE_FINISH(bl);
   }
@@ -347,6 +349,7 @@ void encode(ceph::buffer::list& bl, uint64_t features) const {
     decode(cache_id, it);
     decode(primary_infos, it);
     decode(daemon_infos, it);
+    decode(uncommitted_cache_infos, it);
     decode(cache_infos, it);
     DECODE_FINISH(it);
   }
@@ -380,24 +383,50 @@ void encode(ceph::buffer::list& bl, uint64_t features) const {
 
     f->open_array_section("cache infos");
     f->dump_unsigned("currently cache id", cache_id);
-    for (const auto &i : cache_infos) {
-      auto &info = i.second;
-      f->open_object_section("cache info");
-      f->dump_unsigned("cache id", info.cache_id);
-      f->dump_unsigned("primary id", info.primary_id);
-      {
-	std::ostringstream oss;
-	oss << "[ ";
-	for (auto it = info.daemon_id.begin(); it != info.daemon_id.end(); it++) {
-	  oss << *it << " ";
-	}
-	oss << "]";
-	f->dump_string("daemons id", oss.str());
-      }
 
+    {
+      f->open_object_section("uncommitted cache infos");
+      for (const auto &i : uncommitted_cache_infos) {
+	auto &info = i.second.second;
+	f->open_object_section("cache info");
+	f->dump_unsigned("cache id", info.cache_id);
+	f->dump_unsigned("primary id", info.primary_id);
+	{
+	  std::ostringstream oss;
+	  oss << "[ ";
+	  for (auto it = info.daemon_id.begin(); it != info.daemon_id.end(); it++) {
+	    oss << *it << " ";
+	  }
+	  oss << "]";
+	  f->dump_string("daemons id", oss.str());
+	}
+	f->close_section();
+      }
       f->close_section();
     }
-    f->close_section();
+
+    {
+      f->open_object_section("committed cache infos");
+      for (const auto &i : cache_infos) {
+	auto &info = i.second;
+	f->open_object_section("cache info");
+	f->dump_unsigned("cache id", info.cache_id);
+	f->dump_unsigned("primary id", info.primary_id);
+	{
+	  std::ostringstream oss;
+	  oss << "[ ";
+	  for (auto it = info.daemon_id.begin(); it != info.daemon_id.end(); it++) {
+	    oss << *it << " ";
+	  }
+	  oss << "]";
+	  f->dump_string("daemons id", oss.str());
+	}
+
+	f->close_section();
+      }
+      f->close_section(); //committed cache infos
+    }
+    f->close_section(); //cache infos
   }
 };
 

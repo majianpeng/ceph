@@ -1067,10 +1067,18 @@ struct RwlCacheRequestReply {
 
   void encode(ceph::buffer::list &bl) const;
   void decode(ceph::buffer::list::const_iterator &it);
-
 };
 WRITE_CLASS_ENCODER(RwlCacheRequestReply::DaemonInfo)
 WRITE_CLASS_ENCODER(RwlCacheRequestReply)
+
+struct RwlCacheRequestReplyAck {
+  epoch_t cache_id;
+  int result;
+
+  void encode(ceph::buffer::list &bl) const;
+  void decode(ceph::buffer::list::const_iterator &it);
+};
+WRITE_CLASS_ENCODER(RwlCacheRequestReplyAck)
 
 struct RwlCacheFree {
   epoch_t cache_id;

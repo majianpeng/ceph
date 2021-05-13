@@ -8225,7 +8225,7 @@ int rwlcache_daemonping(cls_method_context_t hctx, bufferlist *in, bufferlist *o
  * Request repliacted cache-space
  *
  * Input
- * @param request inf (cls::rbd::RwlCacheRequest)
+ * @param request info (cls::rbd::RwlCacheRequest)
  *
  * Output:
  * @param allocated daemon-space info(cls::rbd::RwlCacheRequestReply)
@@ -8273,6 +8273,8 @@ int rwlcache_request(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     return -EEXIST;
   }
 
+  bool re_alloc = false;
+re_alloc:
   std::vector<uint64_t> daemons(req.copies);
   utime_t now = ceph_clock_now();
   for (auto it = map.daemon_infos.begin(); it != map.daemon_infos.end(); it++) {
@@ -8317,7 +8319,7 @@ int rwlcache_request(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     c_info.cache_id = map.cache_id;
     c_info.primary_id = req.id;
     c_info.daemon_id = daemons;
-    map.cache_infos.insert(std::make_pair(c_info.cache_id, c_info));
+    map.uncommitted_cache_infos.insert(std::make_pair(c_info.cache_id, std::make_pair(ceph_clock_now(), c_info)));
 
     value.clear();
     encode(map, value, features);
@@ -8326,16 +8328,89 @@ int rwlcache_request(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
       CLS_ERR("error updating daemon info: %s", cpp_strerror(r).c_str());
       return r;
     }
-
-    /* TODO: before encode, if osd crash how to free space */
     encode(reply, *out);
+  } else if (!re_alloc){
+    // try free uncommitted cache if timeout
+    if ((map.uncommitted_cache_infos.size() + daemons.size()) >= req.copies) {
+      utime_t expiration = ceph_clock_now() - utime_t(2 * RBD_RWLCACHE_PING_TIMEOUT, 0);
+      for (auto it = map.uncommitted_cache_infos.begin(); it != map.uncommitted_cache_infos.end(); it++) {
+	//TODO: maybe we shold sort by create_time and firstly free the oldest uncommitted cache
+	if (it->second.first < expiration) {
+	  uint64_t cache_size = map.primary_infos[it->second.second.primary_id].size;
+	  for (auto i : it->second.second.daemon_id) {
+	    map.daemon_infos[i].free_size += cache_size;
+	  }
+	  map.primary_infos.erase(it->second.second.primary_id);
+	}
+      }
+      re_alloc = true;
+      goto re_alloc;
+    }
   } else {
     return -ENOSPC;
   }
-
   return 0;
 }
 
+/*
+ * Send result for rwlcache_requestreply
+ *
+ * Input
+ * @param ack info (cls::rbd::RwlCacheRequestReplyAck)
+ *
+ * Output
+ * @return 0 on success, negative error code on failure
+ */
+int rwlcache_request_replyack(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  cls::rbd::RwlCacheRequestReplyAck ack;
+  cls_rbd_rwlcache_map map;
+
+  try {
+    auto it = in->cbegin();
+    decode(ack, it);
+  } catch (const ceph::buffer::error &err) {
+    CLS_ERR("decode RwlCacheRequestReplyAck error");
+    return -EINVAL;
+  }
+  CLS_LOG(20, "cache id %u, ack result is %d\n", ack.cache_id, ack.result);
+
+  bufferlist value;
+  int r = cls_cxx_map_get_val(hctx, RWLCACHE_MAP_KEY, &value);
+  if (r < 0 || value.length() == 0) {
+    CLS_LOG(10, "get key(%s) value error or no value", RWLCACHE_MAP_KEY);
+    return r < 0 ? r : -ENOENT;
+  }
+
+  auto it = map.uncommitted_cache_infos.find(ack.cache_id);
+  if (it != map.uncommitted_cache_infos.end()) {
+    if (ack.result == 0) {
+      map.cache_infos.insert(std::make_pair(it->first, it->second.second));
+    } else {
+      uint64_t cache_size = map.primary_infos[it->second.second.primary_id].size;
+      for (auto i : it->second.second.daemon_id) {
+	if (map.daemon_infos.count(i)) {
+	    map.daemon_infos[i].free_size += cache_size;
+	} else {
+	  CLS_LOG(10, "daemon %lu already removed", i);
+	}
+      }
+    }
+    map.uncommitted_cache_infos.erase(it);
+
+    value.clear();
+    encode(map, value, get_encode_features(hctx));
+    r = cls_cxx_map_set_val(hctx, RWLCACHE_MAP_KEY, &value);
+    if (r < 0) {
+      CLS_ERR("error updating daemon info: %s", cpp_strerror(r).c_str());
+      return r;
+    }
+  } else {
+    CLS_LOG(10, "uncommited cache %u already removed", ack.cache_id);
+    return -ENOENT;
+  }
+  return 0;
+}
 /*
  * Free Allocated cache
  *
@@ -8548,6 +8623,7 @@ CLS_INIT(rbd)
   cls_method_handle_t h_rwlcache_daemoninfo;
   cls_method_handle_t h_rwlcache_daemonping;
   cls_method_handle_t h_rwlcache_request;
+  cls_method_handle_t h_rwlcache_request_replyack;
   cls_method_handle_t h_rwlcache_free;
 
   cls_register("rbd", &h_class);
@@ -8973,6 +9049,9 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "rwlcache_request",
 			  CLS_METHOD_RD | CLS_METHOD_WR,
 			  rwlcache_request, &h_rwlcache_request);
+  cls_register_cxx_method(h_class, "rwlcache_request_replyack",
+			  CLS_METHOD_RD | CLS_METHOD_WR,
+			  rwlcache_request_replyack, &h_rwlcache_request_replyack);
   cls_register_cxx_method(h_class, "rwlcache_free",
 			  CLS_METHOD_RD | CLS_METHOD_WR,
 			  rwlcache_free, &h_rwlcache_free);

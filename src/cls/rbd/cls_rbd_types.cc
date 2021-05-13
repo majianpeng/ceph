@@ -1439,6 +1439,22 @@ void RwlCacheRequestReply::decode(bufferlist::const_iterator &it) {
   DECODE_FINISH(it);
 }
 
+void RwlCacheRequestReplyAck::encode(bufferlist &bl) const {
+  using ceph::encode;
+  ENCODE_START(1, 1, bl);
+  encode(cache_id, bl);
+  encode(result, bl);
+  ENCODE_FINISH(bl);
+}
+
+void RwlCacheRequestReplyAck::decode(bufferlist::const_iterator &it) {
+  using ceph::decode;
+  DECODE_START(1, it);
+  decode(cache_id, it);
+  decode(result, it);
+  DECODE_FINISH(it);
+}
+
 void RwlCacheFree::encode(bufferlist &bl) const {
   using ceph::encode;
   ENCODE_START(1, 1, bl);
