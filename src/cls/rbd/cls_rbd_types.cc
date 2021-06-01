@@ -1371,5 +1371,57 @@ void RwlCacheDaemonInfo::decode(bufferlist::const_iterator &it) {
   DECODE_FINISH(it);
 }
 
+void RwlCacheRequest::encode(bufferlist &bl) const {
+  using ceph::encode;
+  ENCODE_START(1, 1, bl);
+  encode(id, bl);
+  encode(size, bl);
+  encode(copies, bl);
+  ENCODE_FINISH(bl);
+}
+
+void RwlCacheRequest::decode(bufferlist::const_iterator &it) {
+  using ceph::decode;
+  DECODE_START(1, it);
+  decode(id, it);
+  decode(size, it);
+  decode(copies, it);
+  DECODE_FINISH(it);
+}
+
+void RwlCacheRequestReply::DaemonInfo::encode(bufferlist &bl) const {
+  using ceph::encode;
+  ENCODE_START(1, 1, bl);
+  encode(id, bl);
+  encode(rdma_address, bl);
+  encode(rdma_port, bl);
+  ENCODE_FINISH(bl);
+}
+
+void RwlCacheRequestReply::DaemonInfo::decode(bufferlist::const_iterator &it) {
+  using ceph::decode;
+  DECODE_START(1, it);
+  decode(id, it);
+  decode(rdma_address, it);
+  decode(rdma_port, it);
+  DECODE_FINISH(it);
+}
+
+void RwlCacheRequestReply::encode(bufferlist &bl) const {
+  using ceph::encode;
+  ENCODE_START(1, 1, bl);
+  encode(cache_id, bl);
+  encode(daemons, bl);
+  ENCODE_FINISH(bl);
+}
+
+void RwlCacheRequestReply::decode(bufferlist::const_iterator &it) {
+  using ceph::decode;
+  DECODE_START(1, it);
+  decode(cache_id, it);
+  decode(daemons, it);
+  DECODE_FINISH(it);
+}
+
 } // namespace rbd
 } // namespace cls
