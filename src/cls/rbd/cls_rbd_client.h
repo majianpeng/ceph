@@ -661,6 +661,9 @@ int sparsify(librados::IoCtx *ioctx, const std::string &oid, uint64_t sparse_siz
 void rwlcache_daemoninfo(librados::ObjectWriteOperation *op, struct cls::rbd::RwlCacheDaemonInfo &req);
 int rwlcache_daemoninfo(librados::IoCtx *ioct, struct cls::rbd::RwlCacheDaemonInfo &req);
 
+int rwlcache_daemonping(librados::IoCtx *ioct, struct cls::rbd::RwlCacheDaemonPing &ping,
+			struct cls::rbd::RwlCacheDaemonNeedFreeCaches &need_free_caches);
+
 int rwlcache_request(librados::IoCtx *ioct, struct cls::rbd::RwlCacheRequest &req,
 		    struct cls::rbd::RwlCacheRequestReply &reply);
 

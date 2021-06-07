@@ -8087,9 +8087,16 @@ static void check_expiration_cache(cls_rbd_rwlcache_map &map)
       CLS_LOG(10, "cache(%u) request_ack timeout, will be remove from uncommitted_caches", it->first);
 
       cls_rbd_rwlcache_map::Cache &cache = it->second.second;
-      for (auto &id : cache.daemons) {
-	map.daemons[id].need_free_caches.insert(it->first);
+
+      for (auto id = cache.daemons.begin(); id != cache.daemons.end();) {
+	if (map.daemons.count(*id) == 0) {
+	  id = cache.daemons.erase(id);
+	} else {
+	  map.daemons[*id].need_free_caches.insert(it->first);
+	  id++;
+	}
       }
+
       map.free_daemon_space_caches.insert(std::make_pair(it->first, cache));
       it = map.uncommitted_caches.erase(it);
     } else {
@@ -8098,6 +8105,18 @@ static void check_expiration_cache(cls_rbd_rwlcache_map &map)
   }
 }
 
+static void check_expiration_daemon(cls_rbd_rwlcache_map &map)
+{
+  utime_t now = ceph_clock_now();
+  for (auto it = map.daemons.begin(); it != map.daemons.end();) {
+    if (it->second.expiration < now) {
+      CLS_LOG(10, "daemon %lu ping expired, will be remvow", it->first);
+      it = map.daemons.erase(it);
+    } else {
+      it++;
+    }
+  }
+}
 
 /**
  * Report rwlcache daemon-info
@@ -8161,17 +8180,160 @@ int rwlcache_daemoninfo(cls_method_context_t hctx, bufferlist *in, bufferlist *o
 
   map.daemons.emplace(info.id, cls_rbd_rwlcache_map::Daemon(info, inst));
 
+  check_expiration_daemon(map);
   check_expiration_cache(map);
 
-  uint64_t features = get_encode_features(hctx);
   value.clear();
-  encode(map, value, features);
+  encode(map, value, get_encode_features(hctx));
 
   r = cls_cxx_map_set_val(hctx, RWLCACHE_MAP_KEY, &value);
   if (r < 0) {
     CLS_ERR("error updating daemon info: %s", cpp_strerror(r).c_str());
     return r;
   }
+  return 0;
+}
+
+/*
+ * Send Ping from daemon to judge daemon whether health
+ *
+ * Input
+ * @param ping info (cls::rbd::RwlCacheDaemonPing)
+ *
+ * Output
+ * @param need free caches info(cls::rbd::RwlCacheDaemonNeedFreeCaches)
+ * @return -ETIMEDOUT if daemon removed because ping timeout
+ * @returns 0 on success, negative error code on failure
+ */
+int rwlcache_daemonping(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  cls::rbd::RwlCacheDaemonPing ping;
+  cls_rbd_rwlcache_map map;
+
+  try {
+    auto it = in->cbegin();
+    decode(ping, it);
+  } catch (const ceph::buffer::error &err) {
+    return -EINVAL;
+  }
+
+  CLS_LOG(20, "got Ping for daemon %lu", ping.id);
+
+  bufferlist value;
+  int r = cls_cxx_map_get_val(hctx, RWLCACHE_MAP_KEY, &value);
+  if (r < 0) {
+    CLS_ERR("error reading key %s: %s", RWLCACHE_MAP_KEY, cpp_strerror(r).c_str());
+    return r;
+  }
+
+  try {
+    auto it = value.cbegin();
+    decode(map, it);
+  } catch (ceph::buffer::error &err) {
+    CLS_ERR("decode map error");
+    return -EIO;
+  }
+
+  if (map.daemons.count(ping.id)) {
+    auto &daemon = map.daemons[ping.id];
+    utime_t now = ceph_clock_now();
+
+    if (daemon.expiration < now) {
+      CLS_LOG(10, "daemon %lu lost to send ping", ping.id);
+    }
+
+    daemon.expiration = now + utime_t(RBD_RWLCACHE_DAEMON_PING_TIMEOUT, 0);
+
+    check_expiration_cache(map);
+    check_expiration_daemon(map);
+
+    for (auto cache_id : ping.freed_caches) {
+      if (daemon.need_free_caches.count(cache_id)) {
+	daemon.need_free_caches.erase(cache_id);
+
+	ceph_assert(map.free_daemon_space_caches.count(cache_id));
+	cls_rbd_rwlcache_map::Cache &cache = map.free_daemon_space_caches[cache_id];
+	daemon.free_size += cache.cache_size;
+	cache.daemons.erase(ping.id);
+
+	// Remove expirated daemon.
+	for (auto it = cache.daemons.begin(); it != cache.daemons.end();) {
+	  if (map.daemons.count(*it) == 0) {
+	    it = cache.daemons.erase(it);
+	  } else {
+	    it++;
+	  }
+	}
+
+	// All daemon space freeed, we can remove this cache
+	if (cache.daemons.size() == 0) {
+	  map.free_daemon_space_caches.erase(cache_id);
+	}
+      } else if (map.caches.count(cache_id)) {
+	// Primary die and daemon flush data and free this cache.
+	cls_rbd_rwlcache_map::Cache &cache = map.caches[cache_id];
+
+	daemon.free_size += cache.cache_size;
+	cache.daemons.erase(ping.id);
+
+	for (auto it = cache.daemons.begin(); it != cache.daemons.end();) {
+	  // Remove expirated daemon
+	  if (map.daemons.count(*it) == 0) {
+	    it = cache.daemons.erase(it);
+	  } else {
+	    map.daemons[*it].need_free_caches.insert(cache_id);
+	    it++;
+	  }
+	}
+
+	// Still has daemon need to free space
+	if (cache.daemons.size()) {
+	  map.free_daemon_space_caches.insert(std::make_pair(cache_id, cache));
+	}
+	map.caches.erase(cache_id);
+      } else {
+	// At replicated-cache setup state, primary die and ack don't timeout or no-one
+	// check uncommitted_cached. Daemon detect rdma disconn and aemon deleted
+	// cache-file directly because no data in cache-file.
+	cls_rbd_rwlcache_map::Cache &cache = map.uncommitted_caches[cache_id].second;
+
+	daemon.free_size += cache.cache_size;
+	cache.daemons.erase(ping.id);
+
+	for (auto it = cache.daemons.begin(); it != cache.daemons.end();) {
+	  // Remove expirated daemon
+	  if (map.daemons.count(*it) == 0) {
+	    it = cache.daemons.erase(it);
+	  } else {
+	    map.daemons[*it].need_free_caches.insert(cache_id);
+	    it++;
+	  }
+	}
+
+	// Still has daemon need to free space
+	if (cache.daemons.size()) {
+	  map.free_daemon_space_caches.insert(std::make_pair(cache_id, cache));
+	}
+	map.uncommitted_caches.erase(cache_id);
+      }
+    }
+
+    value.clear();
+    encode(map, value, get_encode_features(hctx));
+    r = cls_cxx_map_set_val(hctx, RWLCACHE_MAP_KEY, &value);
+    if (r < 0) {
+      CLS_ERR("error updating daemon ping:%s", cpp_strerror(r).c_str());
+      return r;
+    }
+
+    cls::rbd::RwlCacheDaemonNeedFreeCaches need_free_caches;
+    need_free_caches.need_free_caches = daemon.need_free_caches;
+    need_free_caches.encode(*out);
+  } else {
+    CLS_LOG(5, "daemon %lu already removed because ping timeout", ping.id);
+    return -ETIMEDOUT;
+  }
+
   return 0;
 }
 
@@ -8220,6 +8382,8 @@ int rwlcache_request(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   entity_inst_t inst;;
   r = cls_get_request_origin(hctx, &inst);
   ceph_assert(r == 0);
+
+  check_expiration_daemon(map);
 
   std::set<uint64_t> daemons;
   for (auto it = map.daemons.begin(); it != map.daemons.end(); it++) {
@@ -8313,7 +8477,10 @@ int rwlcache_request_ack(cls_method_context_t hctx, bufferlist *in, bufferlist *
       cls_rbd_rwlcache_map::Cache &cache = it->second.second;
 
       for (auto it = cache.daemons.begin(); it != cache.daemons.end(); ) {
-	if (ack.need_free_daemons.count(*it) == 0) {
+	// Remove expiratd daemon
+	if (map.daemons.count(*it) == 0) {
+	  it = cache.daemons.erase(it);
+	} else if (ack.need_free_daemons.count(*it) == 0) {
 	  map.daemons[*it].free_size += cache.cache_size;
 	  it = cache.daemons.erase(it);
 	} else {
@@ -8328,6 +8495,7 @@ int rwlcache_request_ack(cls_method_context_t hctx, bufferlist *in, bufferlist *
     }
     map.uncommitted_caches.erase(it);
 
+    check_expiration_daemon(map);
     check_expiration_cache(map);
 
     value.clear();
@@ -8399,6 +8567,7 @@ int rwlcache_free(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
   map.caches.erase(req.cache_id);
 
+  check_expiration_daemon(map);
   check_expiration_cache(map);
 
   value.clear();
@@ -8548,6 +8717,7 @@ CLS_INIT(rbd)
   cls_method_handle_t h_assert_snapc_seq;
   cls_method_handle_t h_sparsify;
   cls_method_handle_t h_rwlcache_daemoninfo;
+  cls_method_handle_t h_rwlcache_daemonping;
   cls_method_handle_t h_rwlcache_request;
   cls_method_handle_t h_rwlcache_request_ack;
   cls_method_handle_t h_rwlcache_free;
@@ -8969,6 +9139,9 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "rwlcache_daemoninfo",
 			  CLS_METHOD_RD | CLS_METHOD_WR,
 			  rwlcache_daemoninfo, &h_rwlcache_daemoninfo);
+  cls_register_cxx_method(h_class, "rwlcache_daemonping",
+			  CLS_METHOD_RD | CLS_METHOD_WR,
+			  rwlcache_daemonping, &h_rwlcache_daemonping);
   cls_register_cxx_method(h_class, "rwlcache_request",
 			  CLS_METHOD_RD | CLS_METHOD_WR,
 			  rwlcache_request, &h_rwlcache_request);
