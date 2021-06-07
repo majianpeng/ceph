@@ -673,6 +673,8 @@ int rwlcache_request_ack(librados::IoCtx *ioct, struct cls::rbd::RwlCacheRequest
 void rwlcache_free(librados::ObjectWriteOperation *op, struct cls::rbd::RwlCacheFree &req);
 int rwlcache_free(librados::IoCtx *ioctx, struct cls::rbd::RwlCacheFree &req);
 
+int rwlcache_primaryping(librados::IoCtx *ioct, epoch_t cache_id, bool &has_removed_daemon);
+
 } // namespace cls_client
 } // namespace librbd
 
