@@ -664,6 +664,9 @@ int rwlcache_daemoninfo(librados::IoCtx *ioct, struct cls::rbd::RwlCacheDaemonIn
 int rwlcache_request(librados::IoCtx *ioct, struct cls::rbd::RwlCacheRequest &req,
 		    struct cls::rbd::RwlCacheRequestReply &reply);
 
+void rwlcache_request_ack(librados::ObjectWriteOperation *op, struct cls::rbd::RwlCacheRequestAck &req);
+int rwlcache_request_ack(librados::IoCtx *ioct, struct cls::rbd::RwlCacheRequestAck &req);
+
 } // namespace cls_client
 } // namespace librbd
 
