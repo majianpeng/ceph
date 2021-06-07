@@ -8153,6 +8153,93 @@ int rwlcache_daemoninfo(cls_method_context_t hctx, bufferlist *in, bufferlist *o
   return 0;
 }
 
+/*
+ * Request repliacted cache-space
+ *
+ * Input
+ * @param request info (cls::rbd::RwlCacheRequest)
+ *
+ * Output:
+ * @param allocated daemon-space info(cls::rbd::RwlCacheRequestReply)
+ * @return 0 on success, negative error code on failure
+ */
+int rwlcache_request(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  cls::rbd::RwlCacheRequest req;
+  cls::rbd::RwlCacheRequestReply reply;
+  cls_rbd_rwlcache_map map;
+  int r;
+
+  try {
+    auto it = in->cbegin();
+    decode(req, it);
+  } catch (const ceph::buffer::error &err) {
+    return -EINVAL;
+  }
+
+  CLS_LOG(20, "new rwlcache request id=%lu, size=%lu, copies=%u",
+      req.id, req.size, req.copies);
+
+  bufferlist value;
+  r = cls_cxx_map_get_val(hctx, RWLCACHE_MAP_KEY, &value);
+  if (r < 0) {
+    CLS_LOG(5, "error reading key %s: %s", RWLCACHE_MAP_KEY, cpp_strerror(r).c_str());
+    return r;
+  }
+
+  try {
+    auto it = value.cbegin();
+    decode(map, it);
+  } catch (const ceph::buffer::error &err) {
+    CLS_ERR("decode rwlcache map error");
+    return -EIO;
+  }
+
+  entity_inst_t inst;;
+  r = cls_get_request_origin(hctx, &inst);
+  ceph_assert(r == 0);
+
+  std::set<uint64_t> daemons;
+  for (auto it = map.daemons.begin(); it != map.daemons.end(); it++) {
+    if ((it->second.free_size >= req.size) &&
+	(!it->second.daemon_addr.is_same_host(inst.addr))) {
+      daemons.emplace(it->second.id);
+
+      if (daemons.size() == req.copies) {
+	break;
+      }
+    }
+  }
+
+  if (daemons.size() == req.copies) {
+    uint64_t features = get_encode_features(hctx);
+
+    for (auto &id : daemons) {
+      auto &daemon = map.daemons[id];
+      daemon.free_size -= req.size;
+      reply.daemons.push_back(cls::rbd::RwlCacheRequestReply::DaemonInfo{daemon.id, daemon.rdma_address, daemon.rdma_port});
+    }
+
+    map.current_cache_id++;
+    map.caches.emplace(map.current_cache_id,
+		       cls_rbd_rwlcache_map::Cache(map.current_cache_id, req, inst.addr, daemons));
+
+    value.clear();
+    encode(map, value, features);
+    r = cls_cxx_map_set_val(hctx, RWLCACHE_MAP_KEY, &value);
+    if (r < 0) {
+      CLS_ERR("error updating daemon info: %s", cpp_strerror(r).c_str());
+      return r;
+    }
+
+    reply.cache_id = map.current_cache_id;
+    encode(reply, *out);
+  } else {
+    return -ENOSPC;
+  }
+  return 0;
+}
+
 CLS_INIT(rbd)
 {
   CLS_LOG(20, "Loaded rbd class!");
@@ -8289,6 +8376,7 @@ CLS_INIT(rbd)
   cls_method_handle_t h_assert_snapc_seq;
   cls_method_handle_t h_sparsify;
   cls_method_handle_t h_rwlcache_daemoninfo;
+  cls_method_handle_t h_rwlcache_request;
 
   cls_register("rbd", &h_class);
   cls_register_cxx_method(h_class, "create",
@@ -8707,5 +8795,7 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "rwlcache_daemoninfo",
 			  CLS_METHOD_RD | CLS_METHOD_WR,
 			  rwlcache_daemoninfo, &h_rwlcache_daemoninfo);
-
+  cls_register_cxx_method(h_class, "rwlcache_request",
+			  CLS_METHOD_RD | CLS_METHOD_WR,
+			  rwlcache_request, &h_rwlcache_request);
 }
